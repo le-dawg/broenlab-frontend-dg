@@ -25,16 +25,21 @@ app.use(express.static(path.join(__dirname)));
 // POST /login - validate credentials against env and set httpOnly cookie
 app.post('/login', (req, res) => {
   const { username, password } = req.body || {};
+  console.log('Login attempt:', { username, providedPassword: password ? '***' : 'empty', expectedUser: N8N_USERNAME });
   if (username === N8N_USERNAME && password === N8N_PASSWORD) {
     const token = jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: '2h' });
+    // Set secure flag only for HTTPS (production) - crucial for cookie delivery
+    const isProduction = process.env.NODE_ENV === 'production' || req.secure || req.headers['x-forwarded-proto'] === 'https';
+    console.log('Login successful! Setting cookie with secure:', isProduction);
     res.cookie('session', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isProduction,
       sameSite: 'lax',
       maxAge: 2 * 60 * 60 * 1000,
     });
     return res.json({ ok: true });
   }
+  console.log('Login failed - invalid credentials');
   return res.status(401).json({ ok: false, error: 'Invalid credentials' });
 });
 
@@ -48,7 +53,11 @@ app.post('/logout', (req, res) => {
 app.all('/proxy/webhook', async (req, res) => {
   try {
     const token = req.cookies.session;
-    if (!token) return res.status(401).json({ error: 'Not authenticated' });
+    console.log('Proxy request - cookies received:', req.cookies);
+    if (!token) {
+      console.log('No session cookie found - returning 401');
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
     jwt.verify(token, JWT_SECRET);
 
     const basic = Buffer.from(`${N8N_USERNAME}:${N8N_PASSWORD}`).toString('base64');

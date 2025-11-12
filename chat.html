@@ -36,6 +36,33 @@
       .subtitle { font-size:24px }
       header { padding:15px 20px }
     }
+
+    .broen-response { display: flex; flex-direction: column; gap: 1rem; color: var(--chat--color-dark); }
+    .broen-response__text p { margin: 0; line-height: 1.6; }
+    .broen-response__text p + p { margin-top: 0.6rem; }
+    .broen-response__text ul { margin: 0.5rem 0 0; padding-left: 1.25rem; line-height: 1.5; }
+    .broen-response__text li + li { margin-top: 0.35rem; }
+    .broen-response__gallery { border-top: 1px solid rgba(16,19,48,0.08); padding-top: 0.75rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    .broen-response__gallery-title { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: rgba(16,19,48,0.75); }
+    .broen-response__gallery-group { display: flex; flex-direction: column; gap: 0.45rem; }
+    .broen-response__gallery-label { font-size: 0.85rem; font-weight: 600; color: var(--chat--color-primary); }
+    .broen-response__thumbnails { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .broen-thumb { width: 88px; height: 88px; border: 0; border-radius: 10px; overflow: hidden; padding: 0; cursor: pointer; background: rgba(16,19,48,0.06); transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .broen-thumb:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(16,19,48,0.15); }
+    .broen-thumb:focus-visible { outline: 2px solid var(--chat--color-secondary); outline-offset: 2px; }
+    .broen-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .broen-thumb__caption { margin-top: 0.25rem; font-size: 0.75rem; color: rgba(16,19,48,0.65); text-align: center; }
+    .broen-thumb-wrapper { display: flex; flex-direction: column; align-items: center; width: 88px; gap: 0.25rem; }
+    .broen-lightbox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 9999; }
+    .broen-lightbox.is-open { display: flex; }
+    .broen-lightbox__backdrop { position: absolute; inset: 0; background: rgba(16,19,48,0.55); backdrop-filter: blur(2px); }
+    .broen-lightbox__panel { position: relative; background: #ffffff; border-radius: 16px; box-shadow: 0 20px 40px rgba(16,19,48,0.25); padding: 1.5rem; max-width: min(92vw, 720px); max-height: min(92vh, 720px); display: flex; flex-direction: column; gap: 1rem; z-index: 1; }
+    .broen-lightbox__image { width: 100%; max-height: 65vh; object-fit: contain; border-radius: 12px; background: #f5f5f5; }
+    .broen-lightbox__meta { font-size: 0.85rem; color: rgba(16,19,48,0.8); }
+    .broen-lightbox__close { position: absolute; top: 0.75rem; right: 0.75rem; border: none; background: rgba(16,19,48,0.1); color: var(--chat--color-dark); width: 34px; height: 34px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; transition: background 0.2s ease; }
+    .broen-lightbox__close:hover { background: rgba(16,19,48,0.2); }
+    .broen-lightbox__close:focus-visible { outline: 2px solid var(--chat--color-secondary); outline-offset: 2px; }
+    .broen-response__bubble { background: transparent; box-shadow: none; }
   </style>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@n8n/chat/dist/style.css" />
@@ -60,6 +87,35 @@
   <script type="module">
     import { createChat } from 'https://cdn.jsdelivr.net/npm/@n8n/chat/dist/chat.bundle.es.js';
 
+    const imageCache = new Map();
+    const messageQueue = [];
+    let lightboxEl;
+
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async function patchedFetch(input, init) {
+      // Ensure credentials (cookies) are sent with requests to /proxy/webhook
+      const url = typeof input === 'string' ? input : input?.url;
+      if (typeof url === 'string' && url.includes('/proxy/webhook')) {
+        init = init || {};
+        init.credentials = 'include';
+      }
+      const response = await originalFetch(input, init);
+      try {
+        const url = typeof input === 'string' ? input : input?.url;
+        if (typeof url === 'string' && url.includes('/proxy/webhook')) {
+          const cloned = response.clone();
+          const payload = await cloned.json();
+          const normalized = normalizePayload(payload);
+          if (normalized) {
+            messageQueue.push(normalized);
+          }
+        }
+      } catch (err) {
+        console.warn('BROEN-LAB: unable to normalize webhook response', err);
+      }
+      return response;
+    };
+
     // Use the same-origin proxy endpoint. The server should validate the user
     // session, add server-side credentials, and forward to the real n8n webhook.
     createChat({
@@ -79,6 +135,345 @@
         }
       }
     });
+
+    initializeEnhancements();
+
+    function initializeEnhancements() {
+      lightboxEl = ensureLightbox();
+      const root = document.querySelector('#n8n-chat');
+      if (!root) return;
+      const obs = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          mutation.addedNodes.forEach((node) => {
+            if (!(node instanceof Element)) return;
+            const botNodes = [];
+            if (node.matches('.n8n-chat-message--bot, .chat-message.chat-message-from-bot')) {
+              botNodes.push(node);
+            } else {
+              node
+                .querySelectorAll('.n8n-chat-message--bot, .chat-message.chat-message-from-bot')
+                .forEach((el) => botNodes.push(el));
+            }
+            botNodes.forEach(enhanceBotMessage);
+          });
+        }
+      });
+      obs.observe(root, { childList: true, subtree: true });
+    }
+
+    function enhanceBotMessage(messageEl) {
+      if (!(messageEl instanceof HTMLElement)) return;
+      if (messageEl.dataset.broenEnhanced === 'true') return;
+
+      const bubble =
+        messageEl.querySelector(
+          '.n8n-chat-message__bubble, .n8n-chat-message__content, .n8n-chat-message__text, .chat-message-markdown'
+        ) || messageEl;
+      const normalized = messageQueue.length ? messageQueue.shift() : attemptLegacyParse(bubble?.textContent || '');
+      if (!normalized) return;
+
+      bubble.innerHTML = '';
+      bubble.classList.add('broen-response__bubble');
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'broen-response';
+
+      const textBlock = document.createElement('div');
+      textBlock.className = 'broen-response__text';
+      const displayText = normalized.text || normalized.outputs.join('\n\n') || 'Response received.';
+      textBlock.innerHTML = renderMarkdown(displayText);
+      wrapper.appendChild(textBlock);
+
+      const gallery = buildGallery(normalized.imageGroups);
+      if (gallery) {
+        wrapper.appendChild(gallery);
+      }
+
+      bubble.appendChild(wrapper);
+      messageEl.dataset.broenEnhanced = 'true';
+    }
+
+    function buildGallery(groups) {
+      if (!Array.isArray(groups) || groups.length === 0) return null;
+      const gallery = document.createElement('section');
+      gallery.className = 'broen-response__gallery';
+
+      const title = document.createElement('div');
+      title.className = 'broen-response__gallery-title';
+      title.textContent = 'Relevant Images';
+      gallery.appendChild(title);
+
+      let hasContent = false;
+
+      groups.forEach((group) => {
+        if (!group || !Array.isArray(group.images)) return;
+
+        const thumbRow = document.createElement('div');
+        thumbRow.className = 'broen-response__thumbnails';
+        const labelEl = document.createElement('div');
+        labelEl.className = 'broen-response__gallery-label';
+        labelEl.textContent = formatDocumentLabel(group);
+
+        group.images.forEach((image) => {
+          const usable = createImageUrls(image);
+          if (!usable) return;
+          hasContent = true;
+
+          const wrapper = document.createElement('div');
+          wrapper.className = 'broen-thumb-wrapper';
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'broen-thumb';
+          const imgEl = document.createElement('img');
+          imgEl.src = usable.thumb;
+          const alt = buildAltText(group, image);
+          imgEl.alt = alt;
+          btn.appendChild(imgEl);
+          btn.addEventListener('click', () => openLightbox({ src: usable.full, alt, meta: buildMeta(group, image) }));
+
+          wrapper.appendChild(btn);
+          const caption = document.createElement('div');
+          caption.className = 'broen-thumb__caption';
+          caption.textContent = buildCaption(image);
+          wrapper.appendChild(caption);
+          thumbRow.appendChild(wrapper);
+        });
+
+        if (thumbRow.childElementCount > 0) {
+          const groupEl = document.createElement('div');
+          groupEl.className = 'broen-response__gallery-group';
+          groupEl.appendChild(labelEl);
+          groupEl.appendChild(thumbRow);
+          gallery.appendChild(groupEl);
+        }
+      });
+
+      if (!hasContent) return null;
+      return gallery;
+    }
+
+    function renderMarkdown(text) {
+      const lines = text ? text.split('\n') : [];
+      const html = [];
+      let listBuffer = [];
+
+      lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          if (listBuffer.length) {
+            html.push(`<ul>${listBuffer.join('')}</ul>`);
+            listBuffer = [];
+          }
+          return;
+        }
+
+        if (trimmed.startsWith('- ')) {
+          listBuffer.push(`<li>${formatInline(trimmed.slice(2))}</li>`);
+          return;
+        }
+
+        if (listBuffer.length) {
+          html.push(`<ul>${listBuffer.join('')}</ul>`);
+          listBuffer = [];
+        }
+        html.push(`<p>${formatInline(trimmed)}</p>`);
+      });
+
+      if (listBuffer.length) {
+        html.push(`<ul>${listBuffer.join('')}</ul>`);
+      }
+
+      return html.join('') || `<p>${formatInline(text || '')}</p>`;
+    }
+
+    function formatInline(value) {
+      const escaped = escapeHtml(value);
+      const bolded = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      return bolded.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function normalizePayload(payload) {
+      if (!Array.isArray(payload)) return null;
+
+      const outputs = payload
+        .filter((item) => item && typeof item.output === 'string')
+        .map((item) => item.output);
+
+      const imageGroups = [];
+      payload
+        .filter((item) => item && typeof item.Images === 'string')
+        .forEach((item) => {
+          try {
+            const parsed = JSON.parse(item.Images);
+            if (Array.isArray(parsed)) {
+              parsed.forEach((group) => {
+                if (!group || !Array.isArray(group.images)) return;
+                imageGroups.push({
+                  documentIndex: typeof group.documentIndex === 'number' ? group.documentIndex : null,
+                  docId: group.images?.[0]?.doc_id || group._id || '',
+                  images: group.images
+                });
+              });
+            }
+          } catch (err) {
+            console.warn('BROEN-LAB: unable to parse images payload', err);
+          }
+        });
+
+      return {
+        text: outputs.join('\n\n').trim(),
+        outputs,
+        imageGroups,
+        raw: payload
+      };
+    }
+
+    function attemptLegacyParse(raw) {
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed.startsWith('[')) return null;
+      try {
+        return normalizePayload(JSON.parse(trimmed));
+      } catch (err) {
+        console.warn('BROEN-LAB: legacy parse failed', err);
+        return null;
+      }
+    }
+
+    function formatDocumentLabel(group) {
+      if (!group) return 'Document';
+      const base = group.docId || `Document ${group.documentIndex ?? ''}`.trim();
+      const cleaned = base.replace(/\.[^.]+$/, '');
+      const tokens = cleaned.split(/[-_]+/).filter(Boolean);
+      if (!tokens.length) return base || 'Document';
+      const filtered = tokens.filter((token) => !/^[a-f0-9]{6,}$/i.test(token));
+      const finalTokens = filtered.length ? filtered : tokens;
+      const label = finalTokens
+        .map((token) => (token.length <= 3 ? token.toUpperCase() : token[0].toUpperCase() + token.slice(1)))
+        .join(' ');
+      if (typeof group.documentIndex === 'number') {
+        return `${label} · Page ${group.documentIndex + 1}`;
+      }
+      return label;
+    }
+
+    function createImageUrls(image) {
+      if (!image || typeof image.image_b64 !== 'string' || image.image_b64.length === 0) return null;
+      const key = image.image_path || image.figure_id || image.image_b64;
+      if (imageCache.has(key)) {
+        return imageCache.get(key);
+      }
+      try {
+        const mime = guessMimeType(image.image_path);
+        const blob = base64ToBlob(image.image_b64, mime);
+        const full = URL.createObjectURL(blob);
+        // For now, reuse full-size asset as thumbnail; CSS crops it.
+        const urls = { thumb: full, full };
+        imageCache.set(key, urls);
+        return urls;
+      } catch (err) {
+        console.warn('BROEN-LAB: failed to create image URL', err);
+        return null;
+      }
+    }
+
+    function guessMimeType(path) {
+      if (typeof path !== 'string') return 'image/png';
+      if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg';
+      if (path.endsWith('.gif')) return 'image/gif';
+      return 'image/png';
+    }
+
+    function base64ToBlob(base64, type) {
+      const binary = atob(base64);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return new Blob([bytes], { type });
+    }
+
+    function buildAltText(group, image) {
+      const label = formatDocumentLabel(group);
+      const figure = image?.figure_id ? image.figure_id.replace(/_/g, ' ').toUpperCase() : '';
+      return [label, figure].filter(Boolean).join(' – ');
+    }
+
+    function buildCaption(image) {
+      if (!image) return '';
+      if (image.caption) return image.caption;
+      if (image.figure_id) {
+        const match = image.figure_id.match(/p(\d+)_img(\d+)/i);
+        if (match) return `Page ${match[1]} · Fig ${match[2]}`;
+      }
+      return image.figure_id || 'Preview';
+    }
+
+    function buildMeta(group, image) {
+      const label = formatDocumentLabel(group);
+      const caption = buildCaption(image);
+      return caption ? `${label} · ${caption}` : label;
+    }
+
+    function ensureLightbox() {
+      let overlay = document.querySelector('.broen-lightbox');
+      if (overlay) {
+        lightboxEl = overlay;
+        return overlay;
+      }
+      overlay = document.createElement('div');
+      overlay.className = 'broen-lightbox';
+      overlay.innerHTML = `
+        <div class="broen-lightbox__backdrop" data-close></div>
+        <div class="broen-lightbox__panel" role="dialog" aria-modal="true" aria-label="Image preview">
+          <button type="button" class="broen-lightbox__close" aria-label="Close preview">×</button>
+          <img class="broen-lightbox__image" alt="" />
+          <div class="broen-lightbox__meta"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('[data-close]').addEventListener('click', closeLightbox);
+      overlay.querySelector('.broen-lightbox__close').addEventListener('click', closeLightbox);
+      document.addEventListener('keydown', handleKeydown);
+      lightboxEl = overlay;
+      return overlay;
+    }
+
+    function openLightbox({ src, alt, meta }) {
+      const overlay = ensureLightbox();
+      lightboxEl = overlay;
+      const imgEl = overlay.querySelector('.broen-lightbox__image');
+      const metaEl = overlay.querySelector('.broen-lightbox__meta');
+      imgEl.src = src;
+      imgEl.alt = alt || 'Document image preview';
+      metaEl.textContent = meta || alt || '';
+      overlay.classList.add('is-open');
+      overlay.querySelector('.broen-lightbox__close').focus();
+    }
+
+    function closeLightbox() {
+      if (!lightboxEl) lightboxEl = ensureLightbox();
+      lightboxEl.classList.remove('is-open');
+      const imgEl = lightboxEl.querySelector('.broen-lightbox__image');
+      if (imgEl) imgEl.src = '';
+    }
+
+    function handleKeydown(event) {
+      if (event.key === 'Escape') {
+        closeLightbox();
+      }
+    }
   </script>
 </body>
 </html>

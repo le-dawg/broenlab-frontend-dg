@@ -119,7 +119,9 @@
     // Use the same-origin proxy endpoint. The server should validate the user
     // session, add server-side credentials, and forward to the real n8n webhook.
     createChat({
-      webhookUrl: '/proxy/webhook',
+      // Use the proxy route that forwards to your n8n webhook endpoint.
+      // This was updated to support webhook-test paths; adjust if you use a different route.
+      webhookUrl: '/proxy/webhook-test',
       target: '#n8n-chat',
       mode: 'fullscreen',
       showWelcomeScreen: false,
@@ -317,13 +319,34 @@
             const parsed = JSON.parse(item.Images);
             if (Array.isArray(parsed)) {
               parsed.forEach((group) => {
-                if (!group || !Array.isArray(group.images)) return;
-                imageGroups.push({
-                  documentIndex: typeof group.documentIndex === 'number' ? group.documentIndex : null,
-                  docId: group.images?.[0]?.doc_id || group._id || '',
-                  images: group.images
-                });
-              });
+                        if (!group || !Array.isArray(group.images)) return;
+                        // If the webhook included a separate `binary` mapping (common in n8n flows),
+                        // merge the base64 data into each image object as `image_b64` so the
+                        // frontend's existing gallery code can create Blobs/URLs from it.
+                        try {
+                          const binaryMap = item.binary || {};
+                          group.images.forEach((img) => {
+                            try {
+                              const entry = binaryMap && binaryMap[img.figure_id];
+                              if (entry) {
+                                img.image_b64 = (typeof entry === 'object' && entry.data) ? entry.data : entry;
+                                if (typeof entry === 'object' && entry.mimeType) img.mimeType = entry.mimeType;
+                                if (typeof entry === 'object' && entry.fileName) img.fileName = entry.fileName;
+                              }
+                            } catch (e) {
+                              // ignore per-image merge errors
+                            }
+                          });
+                        } catch (e) {
+                          // ignore binary merge errors for this group
+                        }
+
+                        imageGroups.push({
+                          documentIndex: typeof group.documentIndex === 'number' ? group.documentIndex : null,
+                          docId: group.images?.[0]?.doc_id || group._id || '',
+                          images: group.images
+                        });
+                      });
             }
           } catch (err) {
             console.warn('BROEN-LAB: unable to parse images payload', err);

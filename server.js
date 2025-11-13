@@ -11,6 +11,8 @@ app.use(cookieParser());
 
 const PORT = process.env.PORT || 3000;
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL;
+// Optional: support an alternate/test webhook path (e.g. /webhook-test/...)
+const N8N_WEBHOOK_URL_TEST = process.env.N8N_WEBHOOK_URL_TEST;
 const N8N_USERNAME = process.env.N8N_USERNAME;
 const N8N_PASSWORD = process.env.N8N_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_in_prod';
@@ -72,6 +74,44 @@ app.all('/proxy/webhook', async (req, res) => {
     const body = ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body || {});
 
     const upstream = await fetch(N8N_WEBHOOK_URL, {
+      method: req.method,
+      headers: upstreamHeaders,
+      body,
+    });
+
+    const text = await upstream.text();
+    res.status(upstream.status);
+    upstream.headers.forEach((v, k) => {
+      if (!['transfer-encoding', 'content-encoding', 'connection'].includes(k.toLowerCase())) {
+        res.setHeader(k, v);
+      }
+    });
+    res.send(text);
+  } catch (err) {
+    console.error('Proxy error', err);
+    res.status(500).json({ error: 'Proxy error' });
+  }
+});
+
+// Additional proxy route for webhook-test path (some n8n installs use `/webhook-test/...`)
+// For example: https://n8n-ldlsb-u47163.vm.elestio.app/webhook-test/<id>
+app.all('/proxy/webhook-test', async (req, res) => {
+  try {
+    const token = req.cookies.session;
+    if (!token) return res.status(401).json({ error: 'Not authenticated' });
+    jwt.verify(token, JWT_SECRET);
+
+    const target = N8N_WEBHOOK_URL_TEST || N8N_WEBHOOK_URL;
+    if (!target) return res.status(500).json({ error: 'N8N webhook URL not configured' });
+
+    const basic = Buffer.from(`${N8N_USERNAME}:${N8N_PASSWORD}`).toString('base64');
+    const upstreamHeaders = {
+      'Content-Type': req.get('content-type') || 'application/json',
+      Authorization: `Basic ${basic}`,
+    };
+    const body = ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body || {});
+
+    const upstream = await fetch(target, {
       method: req.method,
       headers: upstreamHeaders,
       body,

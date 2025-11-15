@@ -99,6 +99,7 @@
     const messageQueue = [];
     let lightboxEl;
     const messageFeedback = new Map(); // Track feedback per message
+    let feedbackWebhookUrl = null; // Will be loaded from server config
 
     const originalFetch = window.fetch.bind(window);
     window.fetch = async function patchedFetch(input, init) {
@@ -148,6 +149,26 @@
     });
 
     initializeEnhancements();
+
+    async function loadConfig() {
+      try {
+        const response = await fetch('/api/config');
+        if (response.ok) {
+          const config = await response.json();
+          feedbackWebhookUrl = config.feedbackWebhookUrl;
+          if (!feedbackWebhookUrl) {
+            console.warn('BROEN-LAB: Feedback webhook URL not configured on server');
+          }
+        } else {
+          console.warn('BROEN-LAB: Failed to load configuration from server');
+        }
+      } catch (error) {
+        console.error('BROEN-LAB: Error loading configuration', error);
+      }
+    }
+
+    // Load configuration on page load
+    loadConfig();
 
     function initializeEnhancements() {
       lightboxEl = ensureLightbox();
@@ -578,10 +599,13 @@
     }
 
     async function sendFeedback(rating) {
-      const webhookUrl = 'https://n8n-ldlsb-u47163.vm.elestio.app/webhook/9f23ec09-0e55-43f1-9a4b-11bf1d9f211c';
+      if (!feedbackWebhookUrl) {
+        console.warn('BROEN-LAB: Feedback webhook URL not configured, skipping submission');
+        return;
+      }
       
       try {
-        const response = await fetch(webhookUrl, {
+        const response = await fetch(feedbackWebhookUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

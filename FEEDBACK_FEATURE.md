@@ -52,6 +52,12 @@ All changes are contained in a single file: `chat.html`
 
 #### JavaScript Functions
 
+**loadConfig()**
+- Fetches configuration from `/api/config` server endpoint
+- Loads feedback webhook URL into `feedbackWebhookUrl` variable
+- Called on page load to initialize configuration
+- Logs warnings if configuration cannot be loaded
+
 **buildFeedbackUI(messageEl)**
 - Creates the feedback UI elements (two emoji buttons)
 - Attaches click event handlers
@@ -65,8 +71,9 @@ All changes are contained in a single file: `chat.html`
 - Calls sendFeedback() to submit to webhook
 
 **sendFeedback(rating)**
-- Sends POST request to the N8N webhook
+- Sends POST request to the webhook URL loaded from server config
 - Payload: `{ "rating": 0 | 1 }`
+- Checks if webhook URL is configured before attempting to send
 - Logs errors to console without blocking UI
 
 **generateMessageId(messageEl)**
@@ -76,11 +83,18 @@ All changes are contained in a single file: `chat.html`
 
 ### Backend / Webhook Integration
 
-**Endpoint**: `https://n8n-ldlsb-u47163.vm.elestio.app/webhook/9f23ec09-0e55-43f1-9a4b-11bf1d9f211c`
+**Environment Variable**: `N8N_FEEDBACK_WEBHOOK_URL`
 
-**Request Format**:
+**Example Value**: `https://n8n-ldlsb-u47163.vm.elestio.app/webhook/9f23ec09-0e55-43f1-9a4b-11bf1d9f211c`
+
+**Server Endpoint**: `GET /api/config`
+- Returns JSON with client configuration
+- Response format: `{ "feedbackWebhookUrl": "<url>" }`
+- No authentication required (non-sensitive configuration)
+
+**Client Request Format**:
 ```json
-POST /webhook/9f23ec09-0e55-43f1-9a4b-11bf1d9f211c
+POST <N8N_FEEDBACK_WEBHOOK_URL>
 Content-Type: application/json
 
 {
@@ -89,7 +103,8 @@ Content-Type: application/json
 ```
 
 **Notes**:
-- No authentication required for feedback webhook (separate from main chat webhook)
+- Webhook URL is loaded from server on page load via `/api/config`
+- Server reads `N8N_FEEDBACK_WEBHOOK_URL` from environment variables
 - Direct fetch to external URL (not proxied through Express server)
 - Fire-and-forget pattern (doesn't wait for confirmation)
 
@@ -168,23 +183,26 @@ Possible future improvements:
 ## Related Files
 
 ### Modified Files
-1. `chat.html` - Main implementation (CSS + JavaScript)
-2. `AGENTS.md` - Developer documentation
-3. `README_RENDER.md` - User-facing documentation
+1. `chat.html` - Main implementation (CSS + JavaScript + config loading)
+2. `server.js` - Added `/api/config` endpoint and `N8N_FEEDBACK_WEBHOOK_URL` env variable
+3. `.env.example` - Added `N8N_FEEDBACK_WEBHOOK_URL` configuration example
+4. `AGENTS.md` - Developer documentation
+5. `README_RENDER.md` - User-facing documentation
 
 ### No Changes Required
-- `server.js` - No server-side changes needed
 - `index.html` - Not affected (different page)
 - `package.json` - No new dependencies
 
 ## Deployment Notes
 
 ### Prerequisites
-- None (uses existing infrastructure)
+- Server must have `N8N_FEEDBACK_WEBHOOK_URL` environment variable configured
 
 ### Configuration
-- Webhook URL is hardcoded in `chat.html`
-- To change webhook, edit line 581 in `chat.html`
+1. Add `N8N_FEEDBACK_WEBHOOK_URL` to your `.env` file or environment variables
+2. Example: `N8N_FEEDBACK_WEBHOOK_URL=https://n8n-ldlsb-u47163.vm.elestio.app/webhook/9f23ec09-0e55-43f1-9a4b-11bf1d9f211c`
+3. Restart the server to load the new environment variable
+4. Client will automatically fetch the URL on page load
 
 ### Rollback Plan
 If issues arise, revert the single commit:

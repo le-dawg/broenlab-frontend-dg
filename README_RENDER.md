@@ -66,9 +66,11 @@ The chat interface includes a feedback mechanism for rating bot responses:
 - Each message tracks its own feedback independently
 
 ### Technical Details
-- Feedback submissions POST to: `https://n8n-ldlsb-u47163.vm.elestio.app/webhook/9f23ec09-0e55-43f1-9a4b-11bf1d9f211c`
+- Feedback webhook URL configured via `N8N_FEEDBACK_WEBHOOK_URL` environment variable on server
+- Client fetches configuration from `/api/config` endpoint on page load
+- Feedback submissions POST to: URL specified in `N8N_FEEDBACK_WEBHOOK_URL` (example: `https://n8n-ldlsb-u47163.vm.elestio.app/webhook/9f23ec09-0e55-43f1-9a4b-11bf1d9f211c`)
 - Payload format: `{ "rating": 0 }` (0 = thumbs down) or `{ "rating": 1 }` (thumbs up)
-- Implementation is entirely client-side in `chat.html`
+- Implementation spans `chat.html` (client) and `server.js` (config endpoint)
 - No authentication required for feedback webhook (separate from chat webhook)
 
 ### Visual Design

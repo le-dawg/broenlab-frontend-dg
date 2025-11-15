@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 3000;
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL;
 // Optional: support an alternate/test webhook path (e.g. /webhook-test/...)
 const N8N_WEBHOOK_URL_TEST = process.env.N8N_WEBHOOK_URL_TEST;
+const N8N_FEEDBACK_WEBHOOK_URL = process.env.N8N_FEEDBACK_WEBHOOK_URL;
 const N8N_USERNAME = process.env.N8N_USERNAME;
 const N8N_PASSWORD = process.env.N8N_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_in_prod';
@@ -21,8 +22,19 @@ if (!N8N_WEBHOOK_URL || !N8N_USERNAME || !N8N_PASSWORD) {
   console.warn('Warning: N8N_WEBHOOK_URL, N8N_USERNAME or N8N_PASSWORD not set in environment. Set them before production deployment.');
 }
 
+if (!N8N_FEEDBACK_WEBHOOK_URL) {
+  console.warn('Warning: N8N_FEEDBACK_WEBHOOK_URL not set in environment. Feedback feature will not work properly.');
+}
+
 // Serve static files (your index.html lives at project root)
 app.use(express.static(path.join(__dirname)));
+
+// GET /api/config - provide client-side configuration (non-sensitive values only)
+app.get('/api/config', (req, res) => {
+  res.json({
+    feedbackWebhookUrl: N8N_FEEDBACK_WEBHOOK_URL || null,
+  });
+});
 
 // POST /login - validate credentials against env and set httpOnly cookie
 app.post('/login', (req, res) => {

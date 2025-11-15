@@ -63,6 +63,14 @@
     .broen-lightbox__close:hover { background: rgba(16,19,48,0.2); }
     .broen-lightbox__close:focus-visible { outline: 2px solid var(--chat--color-secondary); outline-offset: 2px; }
     .broen-response__bubble { background: transparent; box-shadow: none; }
+    
+    /* Feedback emojis */
+    .broen-feedback { display: flex; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; }
+    .broen-feedback__btn { border: none; background: transparent; cursor: pointer; font-size: 1.25rem; padding: 0.25rem 0.5rem; border-radius: 6px; transition: all 0.2s ease; opacity: 0.3; filter: grayscale(100%); }
+    .broen-feedback__btn:hover { opacity: 0.6; transform: scale(1.1); }
+    .broen-feedback__btn:focus-visible { outline: 2px solid var(--chat--color-secondary); outline-offset: 2px; }
+    .broen-feedback__btn.active { opacity: 1; filter: grayscale(0%); transform: scale(1.05); }
+    .broen-feedback__btn[disabled] { cursor: not-allowed; opacity: 0.2; }
   </style>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@n8n/chat/dist/style.css" />
@@ -90,6 +98,8 @@
     const imageCache = new Map();
     const messageQueue = [];
     let lightboxEl;
+    const messageFeedback = new Map(); // Track feedback per message
+    let feedbackWebhookUrl = null; // Will be loaded from server config
 
     const originalFetch = window.fetch.bind(window);
     window.fetch = async function patchedFetch(input, init) {
@@ -140,6 +150,26 @@
 
     initializeEnhancements();
 
+    async function loadConfig() {
+      try {
+        const response = await fetch('/api/config');
+        if (response.ok) {
+          const config = await response.json();
+          feedbackWebhookUrl = config.feedbackWebhookUrl;
+          if (!feedbackWebhookUrl) {
+            console.warn('BROEN-LAB: Feedback webhook URL not configured on server');
+          }
+        } else {
+          console.warn('BROEN-LAB: Failed to load configuration from server');
+        }
+      } catch (error) {
+        console.error('BROEN-LAB: Error loading configuration', error);
+      }
+    }
+
+    // Load configuration on page load
+    loadConfig();
+
     function initializeEnhancements() {
       lightboxEl = ensureLightbox();
       const root = document.querySelector('#n8n-chat');
@@ -189,6 +219,11 @@
       const gallery = buildGallery(normalized.imageGroups);
       if (gallery) {
         wrapper.appendChild(gallery);
+      }
+
+      const feedbackUI = buildFeedbackUI(messageEl);
+      if (feedbackUI) {
+        wrapper.appendChild(feedbackUI);
       }
 
       bubble.appendChild(wrapper);
@@ -495,6 +530,94 @@
     function handleKeydown(event) {
       if (event.key === 'Escape') {
         closeLightbox();
+      }
+    }
+
+    function buildFeedbackUI(messageEl) {
+      const messageId = generateMessageId(messageEl);
+      
+      const feedbackContainer = document.createElement('div');
+      feedbackContainer.className = 'broen-feedback';
+
+      const thumbsUp = document.createElement('button');
+      thumbsUp.type = 'button';
+      thumbsUp.className = 'broen-feedback__btn';
+      thumbsUp.setAttribute('aria-label', 'Thumbs up');
+      thumbsUp.textContent = '👍';
+      thumbsUp.dataset.rating = '1';
+
+      const thumbsDown = document.createElement('button');
+      thumbsDown.type = 'button';
+      thumbsDown.className = 'broen-feedback__btn';
+      thumbsDown.setAttribute('aria-label', 'Thumbs down');
+      thumbsDown.textContent = '👎';
+      thumbsDown.dataset.rating = '0';
+
+      // Restore previous feedback state if exists
+      const currentFeedback = messageFeedback.get(messageId);
+      if (currentFeedback !== undefined) {
+        if (currentFeedback === 1) {
+          thumbsUp.classList.add('active');
+        } else if (currentFeedback === 0) {
+          thumbsDown.classList.add('active');
+        }
+      }
+
+      thumbsUp.addEventListener('click', () => handleFeedbackClick(messageId, 1, thumbsUp, thumbsDown));
+      thumbsDown.addEventListener('click', () => handleFeedbackClick(messageId, 0, thumbsUp, thumbsDown));
+
+      feedbackContainer.appendChild(thumbsUp);
+      feedbackContainer.appendChild(thumbsDown);
+
+      return feedbackContainer;
+    }
+
+    function generateMessageId(messageEl) {
+      // Generate a stable ID based on message element
+      if (!messageEl.dataset.messageId) {
+        messageEl.dataset.messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      }
+      return messageEl.dataset.messageId;
+    }
+
+    function handleFeedbackClick(messageId, rating, thumbsUp, thumbsDown) {
+      const currentFeedback = messageFeedback.get(messageId);
+      
+      // Toggle logic: if clicking the same button, keep it active (allow re-submission)
+      // If clicking different button, switch to new one
+      thumbsUp.classList.remove('active');
+      thumbsDown.classList.remove('active');
+      
+      if (rating === 1) {
+        thumbsUp.classList.add('active');
+      } else {
+        thumbsDown.classList.add('active');
+      }
+      
+      messageFeedback.set(messageId, rating);
+      sendFeedback(rating);
+    }
+
+    async function sendFeedback(rating) {
+      if (!feedbackWebhookUrl) {
+        console.warn('BROEN-LAB: Feedback webhook URL not configured, skipping submission');
+        return;
+      }
+      
+      try {
+        const response = await fetch(feedbackWebhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ rating }),
+        });
+        
+        if (!response.ok) {
+          console.warn('BROEN-LAB: Feedback submission failed', response.status);
+        }
+      } catch (error) {
+        console.error('BROEN-LAB: Error sending feedback', error);
       }
     }
   </script>

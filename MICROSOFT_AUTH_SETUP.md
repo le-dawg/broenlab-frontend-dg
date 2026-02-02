@@ -23,7 +23,7 @@ This implementation follows industry-standard security best practices:
 
 - An Azure subscription (free tier works)
 - Access to Azure Portal (portal.azure.com)
-- Administrator permissions to register applications in your Azure AD tenant
+- Ability to register applications in your Azure AD tenant (either administrator permissions, or regular user access if "Users can register applications" setting is enabled in your tenant)
 
 ## Step 1: Register Application in Azure Portal
 

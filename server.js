@@ -12,16 +12,30 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
 // Session middleware for OAuth flow
-const SESSION_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+const SESSION_SECRET = process.env.SESSION_SECRET;
 
-// Validate session secret in production
-if (process.env.NODE_ENV === 'production' && (!SESSION_SECRET || SESSION_SECRET === 'change_this_in_prod')) {
-  console.error('FATAL: SESSION_SECRET must be set to a secure random string in production');
+// Validate session secret is set and secure
+if (!SESSION_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: SESSION_SECRET must be set in production');
+    process.exit(1);
+  } else {
+    console.warn('WARNING: SESSION_SECRET not set. Using temporary random secret for development.');
+    console.warn('Set SESSION_SECRET in .env for consistent sessions across restarts.');
+  }
+}
+
+if (process.env.NODE_ENV === 'production' && SESSION_SECRET === 'change_this_in_prod') {
+  console.error('FATAL: SESSION_SECRET must be changed from default value in production');
   process.exit(1);
 }
 
+// Use provided secret or generate a random one for development
+const crypto = require('crypto');
+const sessionSecret = SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+
 app.use(session({
-  secret: SESSION_SECRET || 'dev_secret_only',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -182,24 +196,15 @@ app.get('/auth/redirect', async (req, res) => {
 
     const token = jwt.sign(userInfo, JWT_SECRET, { expiresIn: '24h' });
 
-    // Set secure httpOnly cookie
-    const isProduction = process.env.NODE_ENV === 'production' || req.secure || req.headers['x-forwarded-proto'] === 'https';
-    
+    // Set secure httpOnly cookie with consistent security settings
     res.cookie('session', token, {
       httpOnly: true,
-      secure: isProduction,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
     });
 
-    // Store tokens in session for potential refresh
-    req.session.msalTokens = {
-      accessToken: response.accessToken,
-      idToken: response.idToken,
-      expiresOn: response.expiresOn,
-    };
-
-    // Clear PKCE codes
+    // Clear PKCE codes from session (no longer needed)
     delete req.session.pkceCodes;
 
     // Redirect to chat page
@@ -216,12 +221,10 @@ app.post('/login', (req, res) => {
   console.log('Login attempt:', { username, providedPassword: password ? '***' : 'empty', expectedUser: N8N_USERNAME });
   if (username === N8N_USERNAME && password === N8N_PASSWORD) {
     const token = jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: '2h' });
-    // Set secure flag only for HTTPS (production) - crucial for cookie delivery
-    const isProduction = process.env.NODE_ENV === 'production' || req.secure || req.headers['x-forwarded-proto'] === 'https';
-    console.log('Login successful! Setting cookie with secure:', isProduction);
+    console.log('Login successful! Setting cookie with secure:', process.env.NODE_ENV === 'production');
     res.cookie('session', token, {
       httpOnly: true,
-      secure: isProduction,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 2 * 60 * 60 * 1000,
     });

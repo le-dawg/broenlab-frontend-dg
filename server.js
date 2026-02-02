@@ -12,8 +12,16 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
 // Session middleware for OAuth flow
+const SESSION_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+
+// Validate session secret in production
+if (process.env.NODE_ENV === 'production' && (!SESSION_SECRET || SESSION_SECRET === 'change_this_in_prod')) {
+  console.error('FATAL: SESSION_SECRET must be set to a secure random string in production');
+  process.exit(1);
+}
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || process.env.JWT_SECRET || 'change_this_in_prod',
+  secret: SESSION_SECRET || 'dev_secret_only',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -78,14 +86,6 @@ if (!N8N_FEEDBACK_WEBHOOK_URL) {
 
 // Serve static files (your index.html lives at project root)
 app.use(express.static(path.join(__dirname)));
-
-// GET /api/config - provide client-side configuration (non-sensitive values only)
-app.get('/api/config', (req, res) => {
-  res.json({
-    feedbackWebhookUrl: N8N_FEEDBACK_WEBHOOK_URL || null,
-    azureAuthEnabled: !!(AZURE_CLIENT_ID && AZURE_CLIENT_SECRET),
-  });
-});
 
 // GET /api/config - provide client-side configuration (non-sensitive values only)
 app.get('/api/config', (req, res) => {

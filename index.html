@@ -98,6 +98,47 @@
       color: #fff;
     }
 
+    .btn-microsoft {
+      background: #fff;
+      color: #5e5e5e;
+      border: 1px solid #8c8c8c;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .btn-microsoft:hover {
+      background: #f3f2f1;
+    }
+
+    .divider {
+      text-align: center;
+      margin: 20px 0;
+      position: relative;
+      color: #8a8886;
+      font-size: 13px;
+    }
+
+    .divider::before,
+    .divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 40%;
+      height: 1px;
+      background: #e1dfdd;
+    }
+
+    .divider::before {
+      left: 0;
+    }
+
+    .divider::after {
+      right: 0;
+    }
+
     .login-error {
       color: #b42318;
       font-size: 13px;
@@ -114,6 +155,21 @@
   <main class="container">
     <div class="login-card">
       <div class="broen-logo">BROEN-LAB</div>
+      
+      <!-- Microsoft Sign In Button (shown only if Azure auth is enabled) -->
+      <div id="microsoft-auth-section" style="display: none;">
+        <button type="button" id="microsoft-signin-btn" class="btn btn-microsoft">
+          <svg width="21" height="21" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="10" height="10" fill="#F25022"/>
+            <rect x="11" width="10" height="10" fill="#7FBA00"/>
+            <rect y="11" width="10" height="10" fill="#00A4EF"/>
+            <rect x="11" y="11" width="10" height="10" fill="#FFB900"/>
+          </svg>
+          Sign in with Microsoft
+        </button>
+        <div class="divider">or</div>
+      </div>
+
       <form id="login-form">
         <div class="login-field">
           <label for="username">Email</label>
@@ -151,6 +207,33 @@
   <script>
     const form = document.getElementById('login-form');
     const loginError = document.getElementById('login-error');
+    const microsoftAuthSection = document.getElementById('microsoft-auth-section');
+    const microsoftSigninBtn = document.getElementById('microsoft-signin-btn');
+
+    // Check for error in URL params (from OAuth redirect)
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorParam = urlParams.get('error');
+    if (errorParam) {
+      loginError.textContent = errorParam;
+      loginError.style.display = 'block';
+    }
+
+    // Fetch config to check if Microsoft auth is enabled
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(config => {
+        if (config.azureAuthEnabled) {
+          microsoftAuthSection.style.display = 'block';
+        }
+      })
+      .catch(err => {
+        console.error('Failed to fetch config:', err);
+      });
+
+    // Handle Microsoft Sign In
+    microsoftSigninBtn.addEventListener('click', () => {
+      window.location.href = '/auth/signin';
+    });
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();

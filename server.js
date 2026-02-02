@@ -221,7 +221,7 @@ app.post('/login', (req, res) => {
   console.log('Login attempt:', { username, providedPassword: password ? '***' : 'empty', expectedUser: N8N_USERNAME });
   if (username === N8N_USERNAME && password === N8N_PASSWORD) {
     const token = jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: '2h' });
-    console.log('Login successful! Setting cookie with secure:', process.env.NODE_ENV === 'production');
+    console.log('Login successful');
     res.cookie('session', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
